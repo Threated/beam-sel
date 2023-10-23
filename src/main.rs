@@ -29,16 +29,9 @@ pub async fn main() {
     let server = axum::Server::bind(&CONFIG.bind_addr)
         .serve(
             Router::new()
-                // .route("/config", post(post_config))
-                // .route(
-                //     "/hello/:name",
-                //     get(greet),
-                // )
                 .fallback(forward_request)
                 .into_make_service(),
         )
         .with_graceful_shutdown(async { tokio::signal::ctrl_c().await.unwrap() });
     tokio::join!(server, beam_task_executor()).0.unwrap();
 }
-
-
