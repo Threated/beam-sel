@@ -31,6 +31,9 @@ pub static BEAM_CLIENT: Lazy<BeamClient> = Lazy::new(|| BeamClient::new(
 pub async fn main() {
     tracing_subscriber::FmtSubscriber::builder()
         .with_env_filter(EnvFilter::from_default_env())
+        .without_time()
+        .pretty()
+        .with_file(false)
         .finish()
         .init();
     let state = AppState::default();
@@ -44,7 +47,7 @@ pub async fn main() {
         .with_graceful_shutdown(async { tokio::signal::ctrl_c().await.unwrap() });
     tokio::select!{
         server_res = server => {
-            info!("Server shuttdown: {server_res:?}");
+            info!("Server shutdown: {server_res:?}");
         },
         _ = beam_task_executor(state) => {}
     }
@@ -52,10 +55,9 @@ pub async fn main() {
 
 /// This is just a better bash script with a lot of hardcoded stuff
 #[cfg(test)]
-mod intergration_tests {
+mod integration_tests {
     use beam_lib::reqwest;
-    use serde_json::Value;
-    use tokio::net::TcpStream;
+    use tokio::{io::{AsyncReadExt, AsyncWriteExt}, net::TcpStream};
 
     #[tokio::test]
     async fn normal_request() -> anyhow::Result<()> {
@@ -66,7 +68,8 @@ mod intergration_tests {
             .body(body)
             .send()
             .await?;
-        assert_eq!(res.json::<Value>().await?["body"].as_str(), Some(body));
+        assert!(res.status().is_success());
+        assert_eq!(res.text().await?, body);
         Ok(())
     }
 
@@ -80,8 +83,13 @@ mod intergration_tests {
             .body(body)
             .send()
             .await?;
-        assert_eq!(res.json::<Value>().await?["body"].as_str(), Some(body));
-        // let stream = TcpStream::connect("")
+        assert_eq!(res.text().await?, body);
+        let mut stream = TcpStream::connect("localhost:81").await?;
+        stream.write_all(body.as_bytes()).await?;
+        stream.flush().await?;
+        let mut buf = vec![0; body.as_bytes().len()];
+        stream.read_exact(&mut buf).await?;
+        assert_eq!(String::from_utf8(buf)?, body);
         Ok(())
     }
 }
