@@ -24,6 +24,10 @@ pub struct Config {
     pub beam_id: AppId,
 
     /// Address of the local SEL
-    #[clap(env, default_value = "sel:8161", value_parser=|addr: &str| addr.to_socket_addrs())]
+    #[clap(env, default_value = "sel:8161", value_parser=to_socket_addrs)]
     pub sel_addr: SocketAddr,
+}
+
+fn to_socket_addrs(addr: &str) -> anyhow::Result<SocketAddr> {
+    addr.to_socket_addrs()?.next().ok_or(anyhow::anyhow!("No socket address"))
 }
