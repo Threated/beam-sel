@@ -1,0 +1,45 @@
+
+services:
+  beamsel1:
+    build: .
+    environment:
+      - BEAM_URL=http://proxy1:8081
+      - BEAM_SECRET=App1Secret
+      - BEAM_ID=app1.proxy1.broker
+      - SEL_ADDR=echo:80
+      - RUST_LOG=debug,hyper=info,hyper-util=info
+    ports:
+      - "81:81"
+      - "8061:8080"
+    networks:
+      - default
+      - dev_default
+  beamsel2:
+    build: .
+    environment:
+      - BEAM_URL=http://proxy2:8082
+      - BEAM_SECRET=App1Secret
+      - BEAM_ID=app1.proxy2.broker
+      - SEL_ADDR=echo:80
+      - RUST_LOG=debug,hyper=info,hyper-util=info
+    ports:
+      - "8062:8080"
+    networks:
+      - default
+      - dev_default
+
+  echo:
+    image: echo-server
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        - bin=test-server
+    environment:
+        - HTTP_PORT=80
+    networks:
+      - default
+
+networks:
+  dev_default:
+    external: true
