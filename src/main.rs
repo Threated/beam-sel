@@ -10,6 +10,7 @@ use futures_util::stream::BoxStream;
 use http_handlers::forward_request;
 use once_cell::sync::Lazy;
 use tokio::{net::TcpListener, sync::{oneshot, Mutex}};
+use tracing::info;
 use tracing_subscriber::{EnvFilter, util::SubscriberInitExt};
 
 mod config;
@@ -41,5 +42,46 @@ pub async fn main() {
             .into_make_service(),
         )
         .with_graceful_shutdown(async { tokio::signal::ctrl_c().await.unwrap() });
-    tokio::join!(server, beam_task_executor(state)).0.unwrap();
+    tokio::select!{
+        server_res = server => {
+            info!("Server shuttdown: {server_res:?}");
+        },
+        _ = beam_task_executor(state) => {}
+    }
+}
+
+/// This is just a better bash script with a lot of hardcoded stuff
+#[cfg(test)]
+mod intergration_tests {
+    use beam_lib::reqwest;
+    use serde_json::Value;
+    use tokio::net::TcpStream;
+
+    #[tokio::test]
+    async fn normal_request() -> anyhow::Result<()> {
+        let client = reqwest::Client::new();
+        let body = "test1234";
+        let res = client.get("http://localhost:8061")
+            .header("beam-remote", "proxy2")
+            .body(body)
+            .send()
+            .await?;
+        assert_eq!(res.json::<Value>().await?["body"].as_str(), Some(body));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_sel_negotiation() -> anyhow::Result<()> {
+        let client = reqwest::Client::new();
+        let body = "test1234";
+        let res = client.get("http://localhost:8061/testConfig")
+            .header("beam-remote", "proxy2")
+            .header("SEL-Port", "81")
+            .body(body)
+            .send()
+            .await?;
+        assert_eq!(res.json::<Value>().await?["body"].as_str(), Some(body));
+        // let stream = TcpStream::connect("")
+        Ok(())
+    }
 }

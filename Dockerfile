@@ -15,4 +15,5 @@ RUN cargo build --release --bin beam-sel
 
 FROM gcr.io/distroless/cc-debian12 AS runtime
 COPY --from=builder /app/target/release/beam-sel /usr/local/bin/
+STOPSIGNAL SIGINT
 ENTRYPOINT ["/usr/local/bin/beam-sel"]
