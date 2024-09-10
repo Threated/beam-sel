@@ -22,7 +22,10 @@ impl<S: Send + Sync> FromRequestParts<S> for ExtractRemote {
         let beam_remote = parts.headers
             .get(&BEAM_REMOTE_HEADER)
             .and_then(|h| h.to_str().ok())
-            .ok_or(StatusCode::BAD_REQUEST)?;
+            .ok_or_else(|| {
+                warn!(?parts.headers, "Did not find beam-remote header");
+                StatusCode::BAD_REQUEST
+            })?;
         Ok(Self(AppId::new_unchecked(format!(
             "{}.{}.{}",
             CONFIG.beam_id.app_name(),
