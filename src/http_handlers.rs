@@ -95,7 +95,7 @@ pub async fn forward_request(
 async fn on_mpc_port_decided(port: u16, remote: AppId, state: AppState) {
     let listener = match TcpListener::bind((CONFIG.bind_addr.ip(), port)).await {
         Ok(socket) => {
-            info!("Binded to port {port}");
+            info!("Bound to port {port}");
             socket
         },
         Err(e) => {
@@ -103,31 +103,37 @@ async fn on_mpc_port_decided(port: u16, remote: AppId, state: AppState) {
             return;
         }
     };
-    let span = info_span!("Socket tunnel", port, to = remote.as_ref());
+    let span = info_span!(parent: None, "Socket relay", port, to = remote.as_ref());
     tokio::spawn(async move {
         info!("Waiting for connection");
-        let mut local_con = match listener.accept().await {
-            Ok((socket, _addr)) => {
-                info!("Starting socket relay");
-                socket
-            },
-            Err(e) => {
-                warn!("Failed accept on local socket: {e}");
-                return;
-            }
-        };
-        let mut remote = match negotiate_socket(remote, Intend::sel(port), &state).instrument(Span::current()).await {
-            Ok(socket) => socket,
-            Err(e) => {
-                warn!("Failed create remote socket: {e}");
-                return;
-            }
-        };
-        info!("Negotiated socket for relay. Transfering");
-        if let Err(e) = tokio::io::copy_bidirectional(&mut local_con, &mut remote).await {
-            debug!("Relaying socket connection failed: {e}");
+        for i in 0..2 {
+            let mut local_con = match listener.accept().await {
+                Ok((socket, _addr)) => {
+                    info!(%i, "Starting socket relay");
+                    socket
+                },
+                Err(e) => {
+                    warn!("Failed accept on local socket: {e}");
+                    return;
+                }
+            };
+            let state = state.clone();
+            let remote = remote.clone();
+            tokio::spawn(async move {
+                let mut remote = match negotiate_socket(remote, Intend::sel(port), &state).instrument(Span::current()).await {
+                    Ok(socket) => socket,
+                    Err(e) => {
+                        warn!("Failed create remote socket: {e}");
+                        return;
+                    }
+                };
+                info!("Negotiated socket for relay. Transfering");
+                if let Err(e) = tokio::io::copy_bidirectional(&mut local_con, &mut remote).await {
+                    debug!("Relaying socket connection failed: {e}");
+                }
+                debug!("Transfer ended");
+            }.instrument(info_span!("Relay", i)));
         }
-        debug!("Transfer ended");
     }.instrument(span));
 }
 
