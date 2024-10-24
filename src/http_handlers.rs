@@ -1,14 +1,10 @@
-use anyhow::bail;
-use axum::{async_trait, body::Body, extract::{FromRequestParts, State}, http::{request::Parts, HeaderName, Request, StatusCode}, response::{IntoResponse, Response, Result}};
-use beam_lib::{AppId, MsgId};
-use futures_util::TryStreamExt;
+use axum::{async_trait, body::Body, extract::FromRequestParts, http::{request::Parts, HeaderName, Request, StatusCode}, response::{IntoResponse, Response, Result}};
+use beam_lib::AppId;
 use hyper_util::rt::TokioIo;
-use serde::{Deserialize, Serialize};
-use tokio::{io::{AsyncRead, AsyncWrite}, net::TcpListener, sync::oneshot};
-use tokio_util::io::{ReaderStream, StreamReader};
+use tokio::net::TcpListener;
 use tracing::{debug, info, info_span, warn, Instrument, Span};
 
-use crate::{AppState, BEAM_CLIENT, CONFIG};
+use crate::{BEAM_CLIENT, CONFIG};
 
 static BEAM_REMOTE_HEADER: HeaderName = HeaderName::from_static("beam-remote");
 
@@ -35,31 +31,14 @@ impl<S: Send + Sync> FromRequestParts<S> for ExtractRemote {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
-pub(crate) struct Intend {
-    pub(crate) id: MsgId,
-    pub(crate) port: Option<u16>,
-}
-
-impl Intend {
-    pub(crate) fn http() -> Self {
-        Self { id: MsgId::new(), port: None }
-    }
-
-    pub(crate) fn sel(port: u16) -> Self {
-        Self { id: MsgId::new(), port: Some(port) }
-    }
-}
-
 #[tracing::instrument(skip_all, fields(to = %remote, method = ?req.method(), path = ?req.uri().path()))]
 pub async fn forward_request(
     ExtractRemote(remote): ExtractRemote,
-    State(state): State<AppState>,
     req: Request<Body>
 ) -> Result<Response, StatusCode> {
     let is_sel_port_negotiation = req.uri().path().contains("/testConfig");
 
-    let socket = negotiate_socket(remote.clone(), Intend::http(), &state).await.map_err(|e| {
+    let socket = BEAM_CLIENT.create_socket(&remote).await.map_err(|e| {
         warn!(%e, "Failed to negotiate socket");
         StatusCode::BAD_GATEWAY
     })?;
@@ -85,14 +64,14 @@ pub async fn forward_request(
                 warn!(?headers, "Failed to extract port from /tesConfig request");
                 StatusCode::INTERNAL_SERVER_ERROR
             })?;
-        on_mpc_port_decided(port, remote, state).await;
+        on_mpc_port_decided(port, remote).await;
     }
     info!("Successful request");
     Ok(res.into_response())
 }
 
-#[tracing::instrument(skip(state, remote))]
-async fn on_mpc_port_decided(port: u16, remote: AppId, state: AppState) {
+#[tracing::instrument]
+async fn on_mpc_port_decided(port: u16, remote: AppId) {
     let listener = match TcpListener::bind((CONFIG.bind_addr.ip(), port)).await {
         Ok(socket) => {
             info!("Bound to port {port}");
@@ -117,10 +96,9 @@ async fn on_mpc_port_decided(port: u16, remote: AppId, state: AppState) {
                     return;
                 }
             };
-            let state = state.clone();
             let remote = remote.clone();
             tokio::spawn(async move {
-                let mut remote = match negotiate_socket(remote, Intend::sel(port), &state).instrument(Span::current()).await {
+                let mut remote = match BEAM_CLIENT.create_socket_with_metadata(&remote, port).await {
                     Ok(socket) => socket,
                     Err(e) => {
                         warn!("Failed create remote socket: {e}");
@@ -135,39 +113,4 @@ async fn on_mpc_port_decided(port: u16, remote: AppId, state: AppState) {
             }.instrument(info_span!("Relay", i)));
         }
     }.instrument(span));
-}
-
-#[tracing::instrument(skip(state, remote), fields(to = %remote.as_ref()))]
-async fn negotiate_socket(remote: AppId, intend: Intend, state: &AppState) -> anyhow::Result<impl AsyncRead + AsyncWrite> {
-    let (tx, rx) = oneshot::channel();
-    state.lock().await.insert(intend.id, tx);
-    let (local_read, local_write) = tokio::io::simplex(1024 * 4);
-    let mut write_fut = Box::pin(async move {
-        BEAM_CLIENT.create_socket_with_metadata(&remote, ReaderStream::new(local_read), intend).await
-    });
-    debug!("Waiting for write to connect");
-    let remote_read = tokio::select! {
-        recv_res = rx => {
-            let Ok(remote_read) = recv_res else {
-                bail!("Gone")
-            };
-            remote_read
-        }
-        write_done = &mut write_fut => {
-            let res = write_done?;
-            if res.status().is_success() {
-                panic!("Hm");
-            } else {
-                bail!("Strange beam response: {res:?}")
-            }
-        }
-    };
-    tokio::spawn(async move {
-        match write_fut.await {
-            Ok(res) if res.status().is_success() => debug!("Successful write ended"),
-            Ok(other) => warn!("Writer response had other status: {other:?}"),
-            Err(e) => warn!(%e, "Beam connection failed"),
-        }
-    }.instrument(Span::current()));
-    Ok(tokio::io::join(StreamReader::new(remote_read.map_err(std::io::Error::other)), local_write))
 }
