@@ -1,12 +1,14 @@
-
-name: Build with rust and docker
+name: Docker
 
 on:
   workflow_run:
-    workflows: [pre-check, rust]
+    workflows: [Rust]
     types: [completed]
     branches: [main]
   workflow_dispatch:
+
+permissions:
+  security-events: write # for github/codeql-action/upload-sarif to upload SARIF results
 
 jobs:
   docker:
@@ -31,6 +33,7 @@ jobs:
       # build-platforms: "linux/amd64"
       # If your actions generate an artifact in a previous build step, you can tell this workflow to download it
       # artifact-name: '*'
+      push-to: dockerhub
     # This passes the secrets from calling workflow to the called workflow
     secrets:
       DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
