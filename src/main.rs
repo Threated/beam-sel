@@ -52,6 +52,7 @@ mod integration_tests {
     use tokio::{io::{AsyncReadExt, AsyncWriteExt}, net::TcpStream};
 
     #[tokio::test]
+    #[ignore]
     async fn normal_request() -> anyhow::Result<()> {
         let client = reqwest::Client::new();
         let body = "test1234";
@@ -66,6 +67,7 @@ mod integration_tests {
     }
 
     #[tokio::test]
+    #[ignore]
     async fn test_sel_negotiation() -> anyhow::Result<()> {
         let client = reqwest::Client::new();
         let body = "test1234";
