@@ -1,4 +1,4 @@
-use axum::{async_trait, body::Body, extract::FromRequestParts, http::{request::Parts, HeaderName, Request, StatusCode}, response::{IntoResponse, Response, Result}};
+use axum::{body::Body, extract::FromRequestParts, http::{request::Parts, HeaderName, Request, StatusCode}, response::{IntoResponse, Response, Result}};
 use beam_lib::AppId;
 use hyper_util::rt::TokioIo;
 use tokio::net::TcpListener;
@@ -10,7 +10,6 @@ static BEAM_REMOTE_HEADER: HeaderName = HeaderName::from_static("beam-remote");
 
 pub struct ExtractRemote(pub AppId);
 
-#[async_trait]
 impl<S: Send + Sync> FromRequestParts<S> for ExtractRemote {
     type Rejection = StatusCode;
 
